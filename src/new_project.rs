@@ -513,6 +513,20 @@ fn scaffold_from_local_path(
     Ok(project_path.to_path_buf())
 }
 
+/// A utility function to escape windows path separators
+fn toml_path_separator_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            ch => out.push(ch),
+        }
+    }
+
+    out
+}
+
 /// When the launcher is running from a jackdaw source checkout,
 /// rewrite the scaffolded project's `Cargo.toml` so the `jackdaw =`
 /// dep points at the local checkout via `path = "..."` rather than
@@ -541,6 +555,19 @@ fn rewrite_jackdaw_dep_for_dev_checkout(project_path: &Path, linkage: TemplateLi
         return;
     };
     let manifest_path = project_path.join("Cargo.toml");
+
+    // Some platforms allow paths that are not valid UTF-8. TOML documents are UTF-8 text,
+    // so such paths cannot be represented faithfully as TOML strings.
+    let checkout = if let Some(checkout) = checkout.to_str() {
+        toml_path_separator_escape(checkout)
+    } else {
+        warn!(
+            "Failed to rewrite jackdaw dep in {} for dev checkout: {}. The path may contain non-utf8 characters.",
+            manifest_path.display(),
+            checkout.display()
+        );
+        return;
+    };
     let Ok(contents) = std::fs::read_to_string(&manifest_path) else {
         return;
     };
@@ -560,7 +587,7 @@ fn rewrite_jackdaw_dep_for_dev_checkout(project_path: &Path, linkage: TemplateLi
             let optional = trimmed.contains("optional = true");
             let mut replacement = format!(
                 "jackdaw = {{ path = \"{}\", default-features = false",
-                checkout.display()
+                checkout
             );
             if optional {
                 replacement.push_str(", optional = true");
@@ -583,7 +610,7 @@ fn rewrite_jackdaw_dep_for_dev_checkout(project_path: &Path, linkage: TemplateLi
         info!(
             "Rewrote jackdaw dep in {} to path = \"{}\" (dev checkout detected)",
             manifest_path.display(),
-            checkout.display()
+            checkout
         );
     }
 }
